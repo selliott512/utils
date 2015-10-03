@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# ipv6-check ver 0.9.0
+#
+# Small script to start or stop IPv6 as a function of whether a host can be
+# contacted via IPv6.
+#
+# by Steven Elliott
+
+# Globals
+
+allowed_params="bname test_host test_port timeout services"
+bname="${0##*/}"
+cfg="/etc/$bname.conf"
+log="/var/log/$bname"
+
+# Functions
+
+function services_do()
+{
+    local action="$1"
+
+    for service in $services
+    do
+        echo "$(date) $action service $service"
+        systemctl "$action" $service.service
+    done
+}
+
+function services_status()
+{
+    local context="$1"
+
+    for service in $services
+    do
+        if systemctl status $service.service &>/dev/null
+        then
+            status=""
+        else
+            status=" NOT"
+        fi
+        echo "$(date) $context service $service is$status running."
+    done
+}
+
+# Main
+
+# Examine config file.
+
+if [[ ! -r $cfg ]]
+then
+    echo "Config file \"$cfg\" does not exist or is not readable." 1>&2
+    exit 1
+fi
+
+sep=""
+list=""
+for allowed_param in $allowed_params
+do
+    list="$list${sep}$allowed_param"
+    sep="|"
+    unset $allowed_param
+done
+
+if grep -qvE "^($list)=[a-zA-Z0-9\" .]*$" "$cfg"
+then
+    echo "Config file \"$cfg\" contains a forbidded character or unsupported \
+parameter." 2>&1
+    exit 1
+fi
+
+. "$cfg"
+
+for allowed_param in $allowed_params
+do
+    if [[ -z $allowed_param ]]
+    then
+        echo "Required parameter \"$allowed_param\" was not in config file \
+\"$cfg\"." 1>&2
+        exit 1
+    fi
+done
+
+# Parse command line options.
+
+unset opt_n opt_y
+while getopts "ny" opt
+do
+    case $opt in
+        n)  
+            opt_n=t
+        ;;
+        y)
+            opt_y=t
+        ;;
+    esac
+done
+
+if [[ (-n $opt_n) && (-n $opt_y) ]]
+then
+    echo "Only one of -n and -y may be specified." 1>&2
+    exit 1
+fi
+
+exec &> >(tee -a "$log")
+
+services_status begin
+
+unset do_start
+if [[ -n $opt_n ]]
+then
+    echo "$(date) option -n passed"
+    unset do_start
+elif [[ -n $opt_y ]]
+then
+    echo "$(date) option -y passed"
+    do_start=t
+else
+    if nc -6 -w $timeout "$test_host" $test_port < /dev/null &> /dev/null
+    then
+        do_start=t
+    else
+        unset do_start
+    fi
+fi
+
+if [[ -n $do_start ]]
+then
+    services_do start
+else
+    services_do stop
+fi
+
+services_status end
