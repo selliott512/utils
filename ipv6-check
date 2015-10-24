@@ -116,12 +116,20 @@ then
     echo "$(date) option -y passed"
     do_start=t
 else
+    # Attempt a connection to wake up the network.
+    nc -6 -w $timeout "$test_host" $test_port < /dev/null &> /dev/null
+
+    # Ping for statistical info.
+    ping6 -c 3 "$test_host"
+
+    echo "$(date) before timed connection to $test_host"
     if nc -6 -w $timeout "$test_host" $test_port < /dev/null &> /dev/null
     then
         do_start=t
     else
         unset do_start
     fi
+    echo "$(date) after  timed connection to $test_host do_start=$do_start"
 fi
 
 if [[ -n $do_start ]]
